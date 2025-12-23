@@ -1,0 +1,50 @@
+# Go build
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.a
+*.o
+*.obj
+
+# Go coverage
+*.cover
+*.cov
+coverage.*
+
+# Go workspace
+/bin/
+/obj/
+/dist/
+/build/
+/tmp/
+/vendor/
+
+# CLI/build outputs
+/out/
+
+# Go env/cache (local only)
+.gocache/
+.gomodcache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Misc
+.env
+.env.*
