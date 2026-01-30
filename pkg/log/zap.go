@@ -15,6 +15,7 @@ var (
 	// defaultLogger 默认日志实例
 	defaultLogger Logger
 	once          sync.Once
+	defaultOnce   sync.Once
 )
 
 // zapLogger zap日志实现
@@ -215,16 +216,18 @@ func Init(cfg *LoggerConfig) error {
 	return err
 }
 
-// Default 获取默认日志实例
+// Default 获取默认日志实例（线程安全）
 func Default() Logger {
-	if defaultLogger == nil {
-		// 如果未初始化，使用默认配置
-		defaultLogger, _ = NewZapLogger(&LoggerConfig{
-			Level:  InfoLevel,
-			Format: "json",
-			Output: "stdout",
-		})
-	}
+	defaultOnce.Do(func() {
+		if defaultLogger == nil {
+			// 如果未初始化，使用默认配置
+			defaultLogger, _ = NewZapLogger(&LoggerConfig{
+				Level:  InfoLevel,
+				Format: "json",
+				Output: "stdout",
+			})
+		}
+	})
 	return defaultLogger
 }
 

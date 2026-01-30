@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -32,6 +33,7 @@ func Timeout(timeout time.Duration) gin.HandlerFunc {
 }
 
 // TimeoutWithConfig 带配置的超时中间件
+// Note: 使用 sync.Once 确保响应只写一次，避免竞态条件
 func TimeoutWithConfig(cfg TimeoutConfig) gin.HandlerFunc {
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 30 * time.Second
@@ -51,7 +53,11 @@ func TimeoutWithConfig(cfg TimeoutConfig) gin.HandlerFunc {
 		// 替换请求上下文
 		c.Request = c.Request.WithContext(ctx)
 
-		// 使用channel监听完成
+		// 使用 sync.Once 确保响应只写一次
+		var once sync.Once
+		var finished bool
+		var mu sync.Mutex
+
 		done := make(chan struct{})
 		panicChan := make(chan interface{}, 1)
 
@@ -62,6 +68,9 @@ func TimeoutWithConfig(cfg TimeoutConfig) gin.HandlerFunc {
 				}
 			}()
 			c.Next()
+			mu.Lock()
+			finished = true
+			mu.Unlock()
 			close(done)
 		}()
 
@@ -73,11 +82,18 @@ func TimeoutWithConfig(cfg TimeoutConfig) gin.HandlerFunc {
 			// 发生panic
 			panic(p)
 		case <-ctx.Done():
-			// 超时
-			c.AbortWithStatusJSON(cfg.StatusCode, gin.H{
-				"code":    cfg.StatusCode,
-				"message": cfg.Message,
-			})
+			// 超时 - 使用 once 确保只写一次响应
+			mu.Lock()
+			isFinished := finished
+			mu.Unlock()
+			if !isFinished {
+				once.Do(func() {
+					c.AbortWithStatusJSON(cfg.StatusCode, gin.H{
+						"code":    cfg.StatusCode,
+						"message": cfg.Message,
+					})
+				})
+			}
 			return
 		}
 	}
@@ -135,11 +151,15 @@ func RequestTimeout(defaultTimeout time.Duration, maxTimeout time.Duration) gin.
 type TimeoutResponse struct {
 	gin.ResponseWriter
 	timedOut bool
+	mu       sync.Mutex
 }
 
 // Write 实现Write方法
 func (tr *TimeoutResponse) Write(b []byte) (int, error) {
-	if tr.timedOut {
+	tr.mu.Lock()
+	timedOut := tr.timedOut
+	tr.mu.Unlock()
+	if timedOut {
 		return 0, context.DeadlineExceeded
 	}
 	return tr.ResponseWriter.Write(b)
@@ -147,20 +167,27 @@ func (tr *TimeoutResponse) Write(b []byte) (int, error) {
 
 // WriteHeader 实现WriteHeader方法
 func (tr *TimeoutResponse) WriteHeader(code int) {
-	if !tr.timedOut {
+	tr.mu.Lock()
+	timedOut := tr.timedOut
+	tr.mu.Unlock()
+	if !timedOut {
 		tr.ResponseWriter.WriteHeader(code)
 	}
 }
 
 // WriteString 实现WriteString方法
 func (tr *TimeoutResponse) WriteString(s string) (int, error) {
-	if tr.timedOut {
+	tr.mu.Lock()
+	timedOut := tr.timedOut
+	tr.mu.Unlock()
+	if timedOut {
 		return 0, context.DeadlineExceeded
 	}
 	return tr.ResponseWriter.WriteString(s)
 }
 
 // TimeoutWithCustomResponse 支持自定义超时响应的中间件
+// Note: 使用 sync.Mutex 保护 timedOut 标志，避免竞态条件
 func TimeoutWithCustomResponse(timeout time.Duration, timeoutHandler gin.HandlerFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
@@ -171,25 +198,37 @@ func TimeoutWithCustomResponse(timeout time.Duration, timeoutHandler gin.Handler
 		tr := &TimeoutResponse{ResponseWriter: c.Writer}
 		c.Writer = tr
 
+		var finished bool
+		var mu sync.Mutex
 		done := make(chan struct{})
 
 		go func() {
 			defer close(done)
 			c.Next()
+			mu.Lock()
+			finished = true
+			mu.Unlock()
 		}()
 
 		select {
 		case <-done:
 			return
 		case <-ctx.Done():
-			tr.timedOut = true
-			if timeoutHandler != nil {
-				timeoutHandler(c)
-			} else {
-				c.AbortWithStatusJSON(http.StatusGatewayTimeout, gin.H{
-					"code":    http.StatusGatewayTimeout,
-					"message": "Request timeout",
-				})
+			mu.Lock()
+			isFinished := finished
+			mu.Unlock()
+			if !isFinished {
+				tr.mu.Lock()
+				tr.timedOut = true
+				tr.mu.Unlock()
+				if timeoutHandler != nil {
+					timeoutHandler(c)
+				} else {
+					c.AbortWithStatusJSON(http.StatusGatewayTimeout, gin.H{
+						"code":    http.StatusGatewayTimeout,
+						"message": "Request timeout",
+					})
+				}
 			}
 		}
 	}

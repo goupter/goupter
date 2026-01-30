@@ -12,6 +12,9 @@ import (
 
 const PluginName = "jwt"
 
+// defaultSecretKey is the insecure default key that must be changed in production
+const defaultSecretKey = "change-me-in-production"
+
 func init() {
 	auth.Register(&Plugin{})
 }
@@ -34,7 +37,7 @@ type Config struct {
 // DefaultConfig 默认配置
 func DefaultConfig() *Config {
 	return &Config{
-		SecretKey:        "change-me-in-production",
+		SecretKey:        defaultSecretKey,
 		Issuer:           "goupter",
 		AccessTokenTTL:   2 * time.Hour,
 		RefreshTokenTTL:  7 * 24 * time.Hour,
@@ -65,6 +68,14 @@ func (p *Plugin) Init(config map[string]interface{}) error {
 	}
 	if v, ok := config["blacklist_enabled"].(bool); ok {
 		p.config.BlacklistEnabled = v
+	}
+
+	// Validate secret key - reject default insecure key
+	if p.config.SecretKey == defaultSecretKey {
+		return fmt.Errorf("jwt: secret_key must be configured, using default key is not allowed")
+	}
+	if len(p.config.SecretKey) < 32 {
+		return fmt.Errorf("jwt: secret_key must be at least 32 characters")
 	}
 
 	p.authenticator = NewAuthenticator(p.config)

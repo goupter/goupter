@@ -35,11 +35,32 @@ func Logger(logger log.Logger) gin.HandlerFunc {
 		c.Set("request_id", requestID)
 		c.Header("X-Request-ID", requestID)
 
-		// 读取请求体
+		// traceID：优先从上游获取，否则使用 requestID
+		traceID := c.GetHeader("X-Trace-ID")
+		if traceID == "" {
+			traceID = requestID
+		}
+		c.Set("trace_id", traceID)
+		c.Header("X-Trace-ID", traceID)
+
+		// 注入到 context.Context（支持 log.WithContext）
+		ctx := log.WithRequestID(c.Request.Context(), requestID)
+		ctx = log.WithTraceID(ctx, traceID)
+		c.Request = c.Request.WithContext(ctx)
+
+		// 读取请求体用于日志记录
+		// Note: 限制读取大小为 64KB，超过此大小的请求体将被截断
+		// 如果需要处理大请求体，请使用 LoggerWithConfig 并设置 LogRequestBody=false
 		var requestBody string
 		if c.Request.Body != nil {
+			// Read full body first
 			bodyBytes, _ := io.ReadAll(c.Request.Body)
-			requestBody = string(bodyBytes)
+			// Only log first 64KB to prevent log bloat
+			const maxLogSize = 64 * 1024
+			if len(bodyBytes) <= maxLogSize {
+				requestBody = string(bodyBytes)
+			}
+			// Restore full body for handler
 			c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 		}
 
@@ -141,10 +162,28 @@ func LoggerWithConfig(cfg LoggerConfig) gin.HandlerFunc {
 		c.Set("request_id", requestID)
 		c.Header("X-Request-ID", requestID)
 
-		// 读取请求体
+		// traceID：优先从上游获取，否则使用 requestID
+		traceID := c.GetHeader("X-Trace-ID")
+		if traceID == "" {
+			traceID = requestID
+		}
+		c.Set("trace_id", traceID)
+		c.Header("X-Trace-ID", traceID)
+
+		// 注入到 context.Context（支持 log.WithContext）
+		ctx := log.WithRequestID(c.Request.Context(), requestID)
+		ctx = log.WithTraceID(ctx, traceID)
+		c.Request = c.Request.WithContext(ctx)
+
+		// 读取请求体（限制大小防止 OOM）
 		var requestBody string
 		if cfg.LogRequestBody && c.Request.Body != nil {
-			bodyBytes, _ := io.ReadAll(c.Request.Body)
+			// Limit read to MaxBodySize to prevent OOM
+			maxRead := int64(cfg.MaxBodySize)
+			if maxRead <= 0 {
+				maxRead = 64 * 1024 // default 64KB
+			}
+			bodyBytes, _ := io.ReadAll(io.LimitReader(c.Request.Body, maxRead))
 			if len(bodyBytes) <= cfg.MaxBodySize {
 				requestBody = string(bodyBytes)
 			}

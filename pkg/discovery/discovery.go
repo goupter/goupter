@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"context"
+	"sync/atomic"
 )
 
 // Discovery 服务发现接口
@@ -50,7 +51,7 @@ type LoadBalancer interface {
 
 // RoundRobinBalancer 轮询负载均衡器
 type RoundRobinBalancer struct {
-	index int
+	index uint32
 }
 
 // NewRoundRobinBalancer 创建轮询负载均衡器
@@ -58,12 +59,11 @@ func NewRoundRobinBalancer() *RoundRobinBalancer {
 	return &RoundRobinBalancer{}
 }
 
-// Select 轮询选择
+// Select 轮询选择（线程安全）
 func (b *RoundRobinBalancer) Select(services []*ServiceInfo) *ServiceInfo {
 	if len(services) == 0 {
 		return nil
 	}
-	service := services[b.index%len(services)]
-	b.index++
-	return service
+	idx := atomic.AddUint32(&b.index, 1) - 1
+	return services[idx%uint32(len(services))]
 }

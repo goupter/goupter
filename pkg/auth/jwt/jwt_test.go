@@ -20,8 +20,9 @@ func TestDefaultConfig(t *testing.T) {
 
 func TestPlugin_Init(t *testing.T) {
 	p := &Plugin{}
+	// Use a secret key that meets the minimum length requirement (32 chars)
 	config := map[string]interface{}{
-		"secret_key":        "test-secret-key",
+		"secret_key":        "test-secret-key-that-is-at-least-32-characters-long",
 		"issuer":            "test-issuer",
 		"access_token_ttl":  "1h",
 		"blacklist_enabled": true,
@@ -31,8 +32,30 @@ func TestPlugin_Init(t *testing.T) {
 	if err != nil {
 		t.Errorf("Init() error = %v", err)
 	}
-	if p.config.SecretKey != "test-secret-key" {
-		t.Errorf("SecretKey = %s, want test-secret-key", p.config.SecretKey)
+	if p.config.SecretKey != "test-secret-key-that-is-at-least-32-characters-long" {
+		t.Errorf("SecretKey = %s, want test-secret-key-that-is-at-least-32-characters-long", p.config.SecretKey)
+	}
+}
+
+func TestPlugin_Init_RejectsDefaultKey(t *testing.T) {
+	p := &Plugin{}
+	config := map[string]interface{}{}
+
+	err := p.Init(config)
+	if err == nil {
+		t.Error("Init() should reject default secret key")
+	}
+}
+
+func TestPlugin_Init_RejectsShortKey(t *testing.T) {
+	p := &Plugin{}
+	config := map[string]interface{}{
+		"secret_key": "short-key",
+	}
+
+	err := p.Init(config)
+	if err == nil {
+		t.Error("Init() should reject secret key shorter than 32 characters")
 	}
 }
 
