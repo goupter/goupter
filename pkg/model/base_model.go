@@ -3,6 +3,9 @@ package model
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -14,12 +17,101 @@ var (
 
 // BaseModel 泛型基础模型
 type BaseModel[T any] struct {
-	db *gorm.DB
+	db              *gorm.DB
+	geometryColumns []string // cached geometry columns
+	selectClause    string   // cached select clause with ST_AsText
 }
 
 // NewBaseModel 创建泛型基础模型
 func NewBaseModel[T any](db *gorm.DB) *BaseModel[T] {
-	return &BaseModel[T]{db: db}
+	m := &BaseModel[T]{db: db}
+	m.initGeometryColumns()
+	return m
+}
+
+// initGeometryColumns initializes geometry columns from the model
+func (m *BaseModel[T]) initGeometryColumns() {
+	var t T
+	// Check if T implements GeometryColumnsProvider
+	if provider, ok := any(&t).(GeometryColumnsProvider); ok {
+		m.geometryColumns = provider.GeometryColumns()
+		m.selectClause = m.buildSelectClause()
+	}
+}
+
+// buildSelectClause builds SELECT clause with ST_AsText for geometry columns
+func (m *BaseModel[T]) buildSelectClause() string {
+	if len(m.geometryColumns) == 0 {
+		return ""
+	}
+
+	var t T
+	typ := reflect.TypeOf(t)
+	if typ.Kind() == reflect.Ptr {
+		typ = typ.Elem()
+	}
+
+	// Build geometry column set for quick lookup
+	geomSet := make(map[string]bool)
+	for _, col := range m.geometryColumns {
+		geomSet[col] = true
+	}
+
+	// Build select clause
+	var parts []string
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		// Get column name from gorm tag
+		gormTag := field.Tag.Get("gorm")
+		colName := parseColumnName(gormTag)
+		if colName == "" {
+			colName = toSnakeCase(field.Name)
+		}
+
+		if geomSet[colName] {
+			// Use ST_AsText for geometry columns with axis-order=long-lat for SRID 4326
+			parts = append(parts, fmt.Sprintf("ST_AsText(`%s`, 'axis-order=long-lat') AS `%s`", colName, colName))
+		} else {
+			parts = append(parts, fmt.Sprintf("`%s`", colName))
+		}
+	}
+
+	return strings.Join(parts, ", ")
+}
+
+// parseColumnName extracts column name from gorm tag
+func parseColumnName(tag string) string {
+	parts := strings.Split(tag, ";")
+	for _, part := range parts {
+		if strings.HasPrefix(part, "column:") {
+			return strings.TrimPrefix(part, "column:")
+		}
+	}
+	return ""
+}
+
+// toSnakeCase converts CamelCase to snake_case
+func toSnakeCase(s string) string {
+	var result strings.Builder
+	for i, r := range s {
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			result.WriteByte('_')
+		}
+		if r >= 'A' && r <= 'Z' {
+			result.WriteByte(byte(r + 32))
+		} else {
+			result.WriteRune(r)
+		}
+	}
+	return result.String()
+}
+
+// applyGeometrySelect applies ST_AsText select clause if model has geometry columns
+func (m *BaseModel[T]) applyGeometrySelect(db *gorm.DB) *gorm.DB {
+	if m.selectClause != "" {
+		return db.Select(m.selectClause)
+	}
+	return db
 }
 
 // Insert 插入数据
@@ -30,7 +122,8 @@ func (m *BaseModel[T]) Insert(ctx context.Context, tx *gorm.DB, data *T) error {
 // FindOne 根据条件查询单条
 func (m *BaseModel[T]) FindOne(ctx context.Context, condition map[string]any) (*T, error) {
 	var result T
-	err := m.db.WithContext(ctx).Where(condition).First(&result).Error
+	db := m.applyGeometrySelect(m.db.WithContext(ctx))
+	err := db.Where(condition).First(&result).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, ErrNotFound
@@ -71,7 +164,7 @@ func (m *BaseModel[T]) FindPage(ctx context.Context, page, pageSize int, orderBy
 	var results []*T
 	var total int64
 
-	db := m.db.WithContext(ctx).Model(new(T))
+	db := m.applyGeometrySelect(m.db.WithContext(ctx).Model(new(T)))
 	if query != "" {
 		db = db.Where(query, args...)
 	}
