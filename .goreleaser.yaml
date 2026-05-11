@@ -138,28 +138,8 @@ release:
     如有问题，请提交 [Issue](https://github.com/goupter/goupter/issues)
 
 # Homebrew 配置（macOS/Linux 包管理器）
-# 注意: brews 正在被废弃，但目前仍然可用
-brews:
-  - name: goupter
-    # Tap 仓库（需要创建 homebrew-tap 仓库）
-    repository:
-      owner: goupter
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    # 提交信息
-    commit_author:
-      name: goreleaserbot
-      email: bot@goreleaser.com
-    # 描述
-    description: "Goupter - 轻量级 Go 微服务框架 CLI 工具"
-    homepage: "https://github.com/goupter/goupter"
-    license: "MIT"
-    # 安装脚本
-    install: |
-      bin.install "goupter"
-    # 测试脚本
-    test: |
-      system "#{bin}/goupter", "--version"
+# 注意: 当前发布仅保证 GitHub Release / go install 可用。
+# 如需启用 Homebrew，请在配置好专用 tap 与 token 后再恢复。
 
 # Scoop 配置（Windows 包管理器）
 # 注意: GoReleaser v2 已移除 scoop 支持，需要手动维护
