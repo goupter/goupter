@@ -229,7 +229,7 @@ func TestPathRateLimitMiddleware(t *testing.T) {
 // === 并发测试 ===
 
 func TestTokenBucket_Concurrent(t *testing.T) {
-	tb := NewTokenBucket(1000, 100)
+	tb := NewTokenBucket(0, 100)
 
 	var wg sync.WaitGroup
 	var allowed, denied int64
@@ -253,8 +253,12 @@ func TestTokenBucket_Concurrent(t *testing.T) {
 
 	wg.Wait()
 
-	if allowed > 100 {
-		t.Errorf("允许的请求数不应超过100，实际: %d", allowed)
+	if allowed != 100 {
+		t.Errorf("允许的请求数应该等于100，实际: %d", allowed)
+	}
+
+	if denied != 100 {
+		t.Errorf("拒绝的请求数应该等于100，实际: %d", denied)
 	}
 
 	t.Logf("并发测试: 允许=%d, 拒绝=%d", allowed, denied)

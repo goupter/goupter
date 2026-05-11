@@ -1,13 +1,20 @@
 package middleware
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
+
+var errTimeoutWriterHijackUnsupported = errors.New("timeout writer does not support hijack")
 
 // TimeoutConfig 超时配置
 type TimeoutConfig struct {
@@ -33,7 +40,6 @@ func Timeout(timeout time.Duration) gin.HandlerFunc {
 }
 
 // TimeoutWithConfig 带配置的超时中间件
-// Note: 使用 sync.Once 确保响应只写一次，避免竞态条件
 func TimeoutWithConfig(cfg TimeoutConfig) gin.HandlerFunc {
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 30 * time.Second
@@ -46,56 +52,12 @@ func TimeoutWithConfig(cfg TimeoutConfig) gin.HandlerFunc {
 	}
 
 	return func(c *gin.Context) {
-		// 创建超时上下文
-		ctx, cancel := context.WithTimeout(c.Request.Context(), cfg.Timeout)
-		defer cancel()
-
-		// 替换请求上下文
-		c.Request = c.Request.WithContext(ctx)
-
-		// 使用 sync.Once 确保响应只写一次
-		var once sync.Once
-		var finished bool
-		var mu sync.Mutex
-
-		done := make(chan struct{})
-		panicChan := make(chan interface{}, 1)
-
-		go func() {
-			defer func() {
-				if p := recover(); p != nil {
-					panicChan <- p
-				}
-			}()
-			c.Next()
-			mu.Lock()
-			finished = true
-			mu.Unlock()
-			close(done)
-		}()
-
-		select {
-		case <-done:
-			// 正常完成
-			return
-		case p := <-panicChan:
-			// 发生panic
-			panic(p)
-		case <-ctx.Done():
-			// 超时 - 使用 once 确保只写一次响应
-			mu.Lock()
-			isFinished := finished
-			mu.Unlock()
-			if !isFinished {
-				once.Do(func() {
-					c.AbortWithStatusJSON(cfg.StatusCode, gin.H{
-						"code":    cfg.StatusCode,
-						"message": cfg.Message,
-					})
-				})
-			}
-			return
-		}
+		executeWithTimeout(c, cfg.Timeout, func(writer gin.ResponseWriter, _ *gin.Context) {
+			writeJSONResponse(writer, cfg.StatusCode, gin.H{
+				"code":    cfg.StatusCode,
+				"message": cfg.Message,
+			})
+		})
 	}
 }
 
@@ -127,14 +89,12 @@ func RequestTimeout(defaultTimeout time.Duration, maxTimeout time.Duration) gin.
 	return func(c *gin.Context) {
 		timeout := defaultTimeout
 
-		// 尝试从Header获取自定义超时
 		if timeoutHeader := c.GetHeader("X-Request-Timeout"); timeoutHeader != "" {
 			if d, err := time.ParseDuration(timeoutHeader); err == nil {
 				timeout = d
 			}
 		}
 
-		// 限制最大超时时间
 		if maxTimeout > 0 && timeout > maxTimeout {
 			timeout = maxTimeout
 		}
@@ -147,89 +107,239 @@ func RequestTimeout(defaultTimeout time.Duration, maxTimeout time.Duration) gin.
 	}
 }
 
-// TimeoutResponse 超时响应包装器
-type TimeoutResponse struct {
-	gin.ResponseWriter
+type bufferedResponseWriter struct {
+	original gin.ResponseWriter
+	header   http.Header
+	body     bytes.Buffer
+	status   int
+	size     int
 	timedOut bool
 	mu       sync.Mutex
 }
 
-// Write 实现Write方法
-func (tr *TimeoutResponse) Write(b []byte) (int, error) {
-	tr.mu.Lock()
-	timedOut := tr.timedOut
-	tr.mu.Unlock()
-	if timedOut {
-		return 0, context.DeadlineExceeded
-	}
-	return tr.ResponseWriter.Write(b)
-}
-
-// WriteHeader 实现WriteHeader方法
-func (tr *TimeoutResponse) WriteHeader(code int) {
-	tr.mu.Lock()
-	timedOut := tr.timedOut
-	tr.mu.Unlock()
-	if !timedOut {
-		tr.ResponseWriter.WriteHeader(code)
+func newBufferedResponseWriter(original gin.ResponseWriter) *bufferedResponseWriter {
+	return &bufferedResponseWriter{
+		original: original,
+		header:   make(http.Header),
+		status:   http.StatusOK,
+		size:     -1,
 	}
 }
 
-// WriteString 实现WriteString方法
-func (tr *TimeoutResponse) WriteString(s string) (int, error) {
-	tr.mu.Lock()
-	timedOut := tr.timedOut
-	tr.mu.Unlock()
-	if timedOut {
+func (w *bufferedResponseWriter) Header() http.Header {
+	return w.header
+}
+
+func (w *bufferedResponseWriter) WriteHeader(code int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if code > 0 && w.status != code {
+		if w.size != -1 {
+			return
+		}
+		w.status = code
+	}
+}
+
+func (w *bufferedResponseWriter) WriteHeaderNow() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.size == -1 {
+		w.size = 0
+	}
+}
+
+func (w *bufferedResponseWriter) Write(data []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.timedOut {
 		return 0, context.DeadlineExceeded
 	}
-	return tr.ResponseWriter.WriteString(s)
+	if w.size == -1 {
+		w.size = 0
+	}
+
+	n, err := w.body.Write(data)
+	w.size += n
+	return n, err
+}
+
+func (w *bufferedResponseWriter) WriteString(s string) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.timedOut {
+		return 0, context.DeadlineExceeded
+	}
+	if w.size == -1 {
+		w.size = 0
+	}
+
+	n, err := w.body.WriteString(s)
+	w.size += n
+	return n, err
+}
+
+func (w *bufferedResponseWriter) Status() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.status
+}
+
+func (w *bufferedResponseWriter) Size() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.size
+}
+
+func (w *bufferedResponseWriter) Written() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.size != -1
+}
+
+func (w *bufferedResponseWriter) Flush() {
+	w.WriteHeaderNow()
+}
+
+func (w *bufferedResponseWriter) CloseNotify() <-chan bool {
+	return w.original.CloseNotify()
+}
+
+func (w *bufferedResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return nil, nil, errTimeoutWriterHijackUnsupported
+}
+
+func (w *bufferedResponseWriter) Pusher() http.Pusher {
+	return w.original.Pusher()
+}
+
+func (w *bufferedResponseWriter) markTimedOut() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.timedOut = true
+}
+
+func (w *bufferedResponseWriter) commitToOriginal() error {
+	w.mu.Lock()
+	if w.timedOut {
+		w.mu.Unlock()
+		return context.DeadlineExceeded
+	}
+
+	header := cloneHeader(w.header)
+	status := w.status
+	size := w.size
+	body := append([]byte(nil), w.body.Bytes()...)
+	w.mu.Unlock()
+
+	dstHeader := w.original.Header()
+	for key, values := range header {
+		dstHeader[key] = append([]string(nil), values...)
+	}
+
+	if size != -1 || status != http.StatusOK || len(header) > 0 {
+		w.original.WriteHeader(status)
+	}
+	if len(body) == 0 {
+		return nil
+	}
+
+	_, err := w.original.Write(body)
+	return err
+}
+
+func executeWithTimeout(c *gin.Context, timeout time.Duration, onTimeout func(gin.ResponseWriter, *gin.Context)) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
+	defer cancel()
+
+	originalWriter := c.Writer
+	bufferedWriter := newBufferedResponseWriter(originalWriter)
+	workerContext := cloneContext(c, bufferedWriter, c.Request.WithContext(ctx))
+
+	done := make(chan struct{})
+	panicChan := make(chan any, 1)
+
+	go func() {
+		defer close(done)
+		defer func() {
+			if p := recover(); p != nil {
+				panicChan <- p
+			}
+		}()
+		workerContext.Next()
+	}()
+
+	select {
+	case p := <-panicChan:
+		panic(p)
+	case <-done:
+		select {
+		case p := <-panicChan:
+			panic(p)
+		default:
+		}
+		_ = bufferedWriter.commitToOriginal()
+		return
+	case <-ctx.Done():
+		bufferedWriter.markTimedOut()
+		onTimeout(originalWriter, cloneContext(c, originalWriter, c.Request.WithContext(ctx)))
+		return
+	}
+}
+
+func cloneContext(c *gin.Context, writer gin.ResponseWriter, request *http.Request) *gin.Context {
+	cloned := *c
+	cloned.Writer = writer
+	cloned.Request = request
+	cloned.Params = append(gin.Params(nil), c.Params...)
+	cloned.Keys = cloneKeys(c.Keys)
+	cloned.Accepted = append([]string(nil), c.Accepted...)
+	return &cloned
+}
+
+func writeJSONResponse(writer gin.ResponseWriter, statusCode int, payload gin.H) {
+	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
+	writer.WriteHeader(statusCode)
+	_ = json.NewEncoder(writer).Encode(payload)
+}
+
+func cloneHeader(header http.Header) http.Header {
+	cloned := make(http.Header, len(header))
+	for key, values := range header {
+		cloned[key] = append([]string(nil), values...)
+	}
+	return cloned
+}
+
+func cloneKeys(keys map[any]any) map[any]any {
+	if len(keys) == 0 {
+		return nil
+	}
+
+	cloned := make(map[any]any, len(keys))
+	for key, value := range keys {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 // TimeoutWithCustomResponse 支持自定义超时响应的中间件
-// Note: 使用 sync.Mutex 保护 timedOut 标志，避免竞态条件
 func TimeoutWithCustomResponse(timeout time.Duration, timeoutHandler gin.HandlerFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
-		defer cancel()
-
-		c.Request = c.Request.WithContext(ctx)
-
-		tr := &TimeoutResponse{ResponseWriter: c.Writer}
-		c.Writer = tr
-
-		var finished bool
-		var mu sync.Mutex
-		done := make(chan struct{})
-
-		go func() {
-			defer close(done)
-			c.Next()
-			mu.Lock()
-			finished = true
-			mu.Unlock()
-		}()
-
-		select {
-		case <-done:
-			return
-		case <-ctx.Done():
-			mu.Lock()
-			isFinished := finished
-			mu.Unlock()
-			if !isFinished {
-				tr.mu.Lock()
-				tr.timedOut = true
-				tr.mu.Unlock()
-				if timeoutHandler != nil {
-					timeoutHandler(c)
-				} else {
-					c.AbortWithStatusJSON(http.StatusGatewayTimeout, gin.H{
-						"code":    http.StatusGatewayTimeout,
-						"message": "Request timeout",
-					})
-				}
+		executeWithTimeout(c, timeout, func(writer gin.ResponseWriter, timeoutContext *gin.Context) {
+			if timeoutHandler != nil {
+				timeoutHandler(timeoutContext)
+				return
 			}
-		}
+
+			writeJSONResponse(writer, http.StatusGatewayTimeout, gin.H{
+				"code":    http.StatusGatewayTimeout,
+				"message": "Request timeout",
+			})
+		})
 	}
 }
