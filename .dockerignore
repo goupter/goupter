@@ -1,0 +1,9 @@
+.git
+.gitignore
+bin
+.gocache
+.gomodcache
+coverage.out
+coverage.html
+**/*_test.go
+**/.DS_Store

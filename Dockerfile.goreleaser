@@ -1,0 +1,25 @@
+# 用于 GoReleaser 的 Dockerfile
+FROM alpine:latest
+
+# 安装 CA 证书（用于 HTTPS 请求）
+RUN apk --no-cache add ca-certificates
+
+# 创建非 root 用户
+RUN addgroup -g 1000 goupter && \
+    adduser -D -u 1000 -G goupter goupter
+
+# 设置工作目录
+WORKDIR /home/goupter
+
+# 从构建上下文复制二进制文件
+COPY goupter /usr/local/bin/goupter
+
+# 设置权限
+RUN chmod +x /usr/local/bin/goupter
+
+# 切换到非 root 用户
+USER goupter
+
+# 设置入口点
+ENTRYPOINT ["/usr/local/bin/goupter"]
+CMD ["--help"]

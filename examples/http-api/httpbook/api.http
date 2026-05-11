@@ -1,0 +1,123 @@
+@baseUrl = http://localhost:8080
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJpc3MiOiJnb3VwdGVyLWV4YW1wbGUiLCJzdWIiOiJhZG1pbiIsImV4cCI6MTc2OTc2MTc5MiwiaWF0IjoxNzY5NzU0NTkyfQ.MC1Y6YO0h4HE70ZkDKkPu-3xI8JcRfYUs83azlL-OCY
+@authId = 1
+@meId = 1
+@articlesId = 1
+@healthId = 1
+
+# Api HTTP API 调试（Rest Client / httpBook / httpYac 兼容）
+# 启动服务: make run SVC=api
+# 使用说明: 先调用 Login 获取 token，然后将 token 值填入上方 @token 变量
+###
+GET {{baseUrl}}/
+Accept: application/json
+###
+GET {{baseUrl}}/api/v1/health
+Accept: application/json
+
+HTTP/1.1 200  - OK
+access-control-allow-credentials: true
+access-control-expose-headers: Content-Length, X-Request-ID, X-Trace-ID
+content-type: application/json; charset=utf-8
+cross-origin-opener-policy: same-origin
+cross-origin-resource-policy: same-origin
+referrer-policy: strict-origin-when-cross-origin
+strict-transport-security: max-age=31536000; includeSubDomains
+x-content-type-options: nosniff
+x-frame-options: DENY
+x-request-id: 3390ffd2-6229-4212-942e-e40c98dce02e
+x-trace-id: 3390ffd2-6229-4212-942e-e40c98dce02e
+x-xss-protection: 1; mode=block
+date: Fri, 30 Jan 2026 06:11:29 GMT
+content-length: 119
+connection: close
+###
+POST {{baseUrl}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "password123"
+}
+
+HTTP/1.1 200  - OK
+access-control-allow-credentials: true
+access-control-expose-headers: Content-Length, X-Request-ID, X-Trace-ID
+content-type: application/json; charset=utf-8
+cross-origin-opener-policy: same-origin
+cross-origin-resource-policy: same-origin
+referrer-policy: strict-origin-when-cross-origin
+strict-transport-security: max-age=31536000; includeSubDomains
+x-content-type-options: nosniff
+x-frame-options: DENY
+x-request-id: c9ea3040-8db1-4f9d-bd7e-c9f2083d46e1
+x-trace-id: c9ea3040-8db1-4f9d-bd7e-c9f2083d46e1
+x-xss-protection: 1; mode=block
+date: Fri, 30 Jan 2026 06:29:52 GMT
+content-length: 531
+connection: close
+###
+POST {{baseUrl}}/api/v1/auth/refresh
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  
+}
+###
+POST {{baseUrl}}/api/v1/auth/logout
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  
+}
+###
+GET {{baseUrl}}/api/v1/me
+Authorization: Bearer {{token}}
+Accept: application/json
+
+HTTP/1.1 200  - OK
+access-control-allow-credentials: true
+access-control-expose-headers: Content-Length, X-Request-ID, X-Trace-ID
+content-type: application/json; charset=utf-8
+cross-origin-opener-policy: same-origin
+cross-origin-resource-policy: same-origin
+referrer-policy: strict-origin-when-cross-origin
+strict-transport-security: max-age=31536000; includeSubDomains
+x-content-type-options: nosniff
+x-frame-options: DENY
+x-request-id: 5fc2602b-16c8-43bb-b3fc-680de9d2fe57
+x-trace-id: 5fc2602b-16c8-43bb-b3fc-680de9d2fe57
+x-xss-protection: 1; mode=block
+date: Fri, 30 Jan 2026 06:11:34 GMT
+content-length: 135
+connection: close
+###
+POST {{baseUrl}}/api/v1/articles
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  
+}
+###
+GET {{baseUrl}}/api/v1/articles?page=1&pageSize=10
+Authorization: Bearer {{token}}
+Accept: application/json
+###
+GET {{baseUrl}}/api/v1/articles/{{articlesId}}
+Authorization: Bearer {{token}}
+Accept: application/json
+###
+PUT {{baseUrl}}/api/v1/articles/{{articlesId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  
+}
+###
+DELETE {{baseUrl}}/api/v1/articles/{{articlesId}}
+Authorization: Bearer {{token}}
+Accept: application/json

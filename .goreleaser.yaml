@@ -1,0 +1,216 @@
+# GoReleaser 配置文件
+# 文档: https://goreleaser.com
+
+# 配置文件版本
+version: 2
+
+# 项目基本信息
+project_name: goupter
+
+# 构建前的准备工作
+before:
+  hooks:
+    # 清理依赖
+    - go mod tidy
+    # 运行测试（可选，取消注释启用）
+    # - go test -v ./...
+
+# 构建配置
+builds:
+  - id: goupter
+    # 主程序入口
+    main: ./cmd/goupter
+    # 二进制文件名
+    binary: goupter
+    # 支持的操作系统
+    goos:
+      - linux
+      - darwin
+      - windows
+    # 支持的架构
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    # ARM 版本
+    goarm:
+      - "7"
+    # 忽略的组合
+    ignore:
+      - goos: windows
+        goarch: arm
+      - goos: windows
+        goarch: arm64
+    # 编译时注入版本信息
+    ldflags:
+      - -s -w
+      - -X github.com/goupter/goupter/cmd/goupter/internal/cmd.Version={{.Version}}
+      - -X github.com/goupter/goupter/cmd/goupter/internal/cmd.BuildTime={{.Date}}
+      - -X github.com/goupter/goupter/cmd/goupter/internal/cmd.GitCommit={{.Commit}}
+    # 环境变量
+    env:
+      - CGO_ENABLED=0
+
+# 归档配置
+archives:
+  - id: goupter
+    # 归档文件名格式
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    # 格式配置（v2 新格式）
+    format_overrides:
+      - goos: windows
+        format: zip
+    # 包含的文件
+    files:
+      - LICENSE
+      - README.md
+      - RELEASE_QUICKSTART.md
+
+# Checksum 配置
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+# Snapshot 配置（用于非 tag 构建）
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+# 更新日志配置
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: "New Features"
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: "Bug Fixes"
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: "Performance Improvements"
+      regexp: "^.*perf[(\\w)]*:+.*$"
+      order: 2
+    - title: "Others"
+      order: 999
+
+# GitHub Release 配置
+release:
+  github:
+    owner: goupter
+    name: goupter
+  # 草稿发布（设为 true 可以先预览）
+  draft: false
+  # 预发布标记
+  prerelease: auto
+  # Release 说明模板
+  header: |
+    ## Goupter {{ .Tag }} ({{ .Date }})
+
+    欢迎使用 Goupter CLI 工具！
+
+    ### 安装方式
+
+    **通过脚本安装（推荐）:**
+    ```bash
+    curl -sSL https://raw.githubusercontent.com/goupter/goupter/main/install.sh | bash
+    ```
+
+    **通过 go install:**
+    ```bash
+    go install github.com/goupter/goupter/cmd/goupter@{{ .Tag }}
+    ```
+
+    **手动下载:**
+    从下方 Assets 中下载对应平台的二进制文件。
+
+  footer: |
+    ---
+
+    **完整更新日志**: https://github.com/goupter/goupter/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+    如有问题，请提交 [Issue](https://github.com/goupter/goupter/issues)
+
+# Homebrew 配置（macOS/Linux 包管理器）
+# 注意: brews 正在被废弃，但目前仍然可用
+brews:
+  - name: goupter
+    # Tap 仓库（需要创建 homebrew-tap 仓库）
+    repository:
+      owner: goupter
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    # 提交信息
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    # 描述
+    description: "Goupter - 轻量级 Go 微服务框架 CLI 工具"
+    homepage: "https://github.com/goupter/goupter"
+    license: "MIT"
+    # 安装脚本
+    install: |
+      bin.install "goupter"
+    # 测试脚本
+    test: |
+      system "#{bin}/goupter", "--version"
+
+# Scoop 配置（Windows 包管理器）
+# 注意: GoReleaser v2 已移除 scoop 支持，需要手动维护
+# scoop:
+#   bucket:
+#     owner: goupter
+#     name: scoop-bucket
+#     token: "{{ .Env.SCOOP_BUCKET_GITHUB_TOKEN }}"
+#   commit_author:
+#     name: goreleaserbot
+#     email: bot@goreleaser.com
+#   description: "Goupter - 轻量级 Go 微服务框架 CLI 工具"
+#   homepage: "https://github.com/goupter/goupter"
+#   license: MIT
+
+# Docker 镜像配置（可选）
+# 注意: 需要 Docker buildx 支持和 GitHub Container Registry 配置
+# 如需启用，请取消下面的注释
+# dockers:
+#   - image_templates:
+#       - "ghcr.io/goupter/goupter:{{ .Version }}-amd64"
+#       - "ghcr.io/goupter/goupter:latest-amd64"
+#     use: buildx
+#     dockerfile: Dockerfile.goreleaser
+#     build_flag_templates:
+#       - "--platform=linux/amd64"
+#       - "--label=org.opencontainers.image.created={{.Date}}"
+#       - "--label=org.opencontainers.image.title={{.ProjectName}}"
+#       - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+#       - "--label=org.opencontainers.image.version={{.Version}}"
+#   - image_templates:
+#       - "ghcr.io/goupter/goupter:{{ .Version }}-arm64"
+#       - "ghcr.io/goupter/goupter:latest-arm64"
+#     use: buildx
+#     dockerfile: Dockerfile.goreleaser
+#     build_flag_templates:
+#       - "--platform=linux/arm64"
+#       - "--label=org.opencontainers.image.created={{.Date}}"
+#       - "--label=org.opencontainers.image.title={{.ProjectName}}"
+#       - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+#       - "--label=org.opencontainers.image.version={{.Version}}"
+#     goarch: arm64
+
+# Docker manifest（多架构镜像）
+# docker_manifests:
+#   - name_template: "ghcr.io/goupter/goupter:{{ .Version }}"
+#     image_templates:
+#       - "ghcr.io/goupter/goupter:{{ .Version }}-amd64"
+#       - "ghcr.io/goupter/goupter:{{ .Version }}-arm64"
+#   - name_template: "ghcr.io/goupter/goupter:latest"
+#     image_templates:
+#       - "ghcr.io/goupter/goupter:latest-amd64"
+#       - "ghcr.io/goupter/goupter:latest-arm64"
+

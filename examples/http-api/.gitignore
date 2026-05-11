@@ -1,0 +1,27 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+/api
+bin/
+
+# Test
+*.test
+*.out
+coverage.html
+
+# Vendor
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Config
+*.local.yaml
+.env
