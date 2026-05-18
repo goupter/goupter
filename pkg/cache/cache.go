@@ -43,6 +43,9 @@ type Cache interface {
 	// Close 关闭连接
 	Close() error
 
+	// Keys 扫描匹配pattern的key列表
+	Keys(ctx context.Context, pattern string) ([]string, error)
+
 	// Ping 检查连接
 	Ping(ctx context.Context) error
 }

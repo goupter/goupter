@@ -260,6 +260,34 @@ func (c *memoryCache) Close() error {
 	return nil
 }
 
+func (c *memoryCache) Keys(ctx context.Context, pattern string) ([]string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var result []string
+	for key, item := range c.data {
+		if item.isExpired() {
+			continue
+		}
+		if matched, _ := matchPattern(pattern, key); matched {
+			result = append(result, key)
+		}
+	}
+	return result, nil
+}
+
+func matchPattern(pattern, key string) (bool, error) {
+	if pattern == "*" {
+		return true, nil
+	}
+	// Simple wildcard matching: only supports * at end or beginning
+	if len(pattern) > 0 && pattern[len(pattern)-1] == '*' {
+		prefix := pattern[:len(pattern)-1]
+		return len(key) >= len(prefix) && key[:len(prefix)] == prefix, nil
+	}
+	return pattern == key, nil
+}
+
 func (c *memoryCache) Ping(ctx context.Context) error {
 	return nil
 }

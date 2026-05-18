@@ -219,6 +219,14 @@ func (c *multiLevelCache) Close() error {
 	return lastErr
 }
 
+func (c *multiLevelCache) Keys(ctx context.Context, pattern string) ([]string, error) {
+	// 只在最后一级执行（通常是Redis）
+	if len(c.levels) > 0 {
+		return c.levels[len(c.levels)-1].Keys(ctx, pattern)
+	}
+	return nil, nil
+}
+
 func (c *multiLevelCache) Ping(ctx context.Context) error {
 	// 检查所有层级
 	for _, level := range c.levels {

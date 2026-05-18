@@ -167,6 +167,10 @@ func (c *redisCache) Close() error {
 	return c.client.Close()
 }
 
+func (c *redisCache) Keys(ctx context.Context, pattern string) ([]string, error) {
+	return c.client.Keys(ctx, pattern).Result()
+}
+
 func (c *redisCache) Ping(ctx context.Context) error {
 	return c.client.Ping(ctx).Err()
 }
