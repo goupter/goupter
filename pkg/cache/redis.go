@@ -82,6 +82,17 @@ func (c *redisCache) Get(ctx context.Context, key string, value interface{}) err
 	return json.Unmarshal(data, value)
 }
 
+func (c *redisCache) GetRaw(ctx context.Context, key string) (string, error) {
+	data, err := c.client.Get(ctx, key).Bytes()
+	if err != nil {
+		if err == redis.Nil {
+			return "", &NotFoundError{Key: key}
+		}
+		return "", err
+	}
+	return string(data), nil
+}
+
 func (c *redisCache) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
 	data, err := json.Marshal(value)
 	if err != nil {

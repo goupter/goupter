@@ -60,6 +60,27 @@ func TestMultiLevelCache_SetGet(t *testing.T) {
 	}
 }
 
+func TestMultiLevelCache_GetRaw(t *testing.T) {
+	l1 := NewMemoryCache()
+	l2 := NewMemoryCache()
+	ctx := context.Background()
+
+	cache := NewMultiLevelCache(WithLevels(l1, l2))
+	defer cache.Close()
+
+	if err := l2.Set(ctx, "key1", "value1", time.Minute); err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+
+	raw, err := cache.GetRaw(ctx, "key1")
+	if err != nil {
+		t.Fatalf("GetRaw failed: %v", err)
+	}
+	if raw != `"value1"` {
+		t.Errorf("Expected raw JSON string %q, got %q", `"value1"`, raw)
+	}
+}
+
 func TestMultiLevelCache_GetFromL2_BackfillL1(t *testing.T) {
 	l1 := NewMemoryCache()
 	l2 := NewMemoryCache()

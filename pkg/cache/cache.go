@@ -9,6 +9,8 @@ import (
 type Cache interface {
 	// Get 获取缓存值
 	Get(ctx context.Context, key string, value interface{}) error
+	// GetRaw 获取缓存原始字符串，不进行 JSON 反序列化
+	GetRaw(ctx context.Context, key string) (string, error)
 	// Set 设置缓存值
 	Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error
 	// Delete 删除缓存

@@ -56,6 +56,28 @@ func TestMemoryCache_SetGet(t *testing.T) {
 	}
 }
 
+func TestMemoryCache_GetRaw(t *testing.T) {
+	cache := NewMemoryCache()
+	defer cache.Close()
+	ctx := context.Background()
+
+	if err := cache.Set(ctx, "key1", "value1", time.Minute); err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+
+	raw, err := cache.GetRaw(ctx, "key1")
+	if err != nil {
+		t.Fatalf("GetRaw failed: %v", err)
+	}
+	if raw != `"value1"` {
+		t.Errorf("Expected raw JSON string %q, got %q", `"value1"`, raw)
+	}
+
+	if _, err := cache.GetRaw(ctx, "nonexistent"); !IsNotFound(err) {
+		t.Errorf("Expected NotFoundError, got %v", err)
+	}
+}
+
 func TestMemoryCache_GetNotFound(t *testing.T) {
 	cache := NewMemoryCache()
 	defer cache.Close()

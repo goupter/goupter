@@ -91,6 +91,17 @@ func (c *memoryCache) Get(ctx context.Context, key string, value interface{}) er
 	return json.Unmarshal(item.value, value)
 }
 
+func (c *memoryCache) GetRaw(ctx context.Context, key string) (string, error) {
+	c.mu.RLock()
+	item, ok := c.data[key]
+	c.mu.RUnlock()
+
+	if !ok || item.isExpired() {
+		return "", &NotFoundError{Key: key}
+	}
+	return string(item.value), nil
+}
+
 func (c *memoryCache) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
 	data, err := json.Marshal(value)
 	if err != nil {

@@ -64,6 +64,19 @@ func (c *multiLevelCache) Get(ctx context.Context, key string, value interface{}
 	return &NotFoundError{Key: key}
 }
 
+func (c *multiLevelCache) GetRaw(ctx context.Context, key string) (string, error) {
+	for _, level := range c.levels {
+		value, err := level.GetRaw(ctx, key)
+		if err == nil {
+			return value, nil
+		}
+		if !IsNotFound(err) {
+			return "", err
+		}
+	}
+	return "", &NotFoundError{Key: key}
+}
+
 func (c *multiLevelCache) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
 	// 写入所有层级
 	var lastErr error
